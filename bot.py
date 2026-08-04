@@ -82,41 +82,23 @@ def tariff_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(keyboard)
 
 # ── Скачивание Excel из OneDrive ───────────────────────────────────────────────
-
 def download_excel_bytes() -> bytes:
     """Скачивает Excel файл из OneDrive sharing-ссылки."""
+    sep = "&" if "?" in ONEDRIVE_SHARE_URL else "?"
+    url = ONEDRIVE_SHARE_URL + sep + "download=1"
+
     headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
+    r = requests.get(url, headers=headers, timeout=30, allow_redirects=True)
+    logger.info("Скачивание: статус %s, Content-Type: %s, размер %d",
+                r.status_code, r.headers.get("Content-Type"), len(r.content))
+    r.raise_for_status()
 
-    r = requests.get(ONEDRIVE_SHARE_URL, headers=headers, timeout=30, allow_redirects=True)
-    html = r.text
-    logger.info("Страница просмотра: статус %s, размер %d", r.status_code, len(html))
+    if r.content[:2] != b"PK":
+        logger.error("Получен не xlsx. Content-Type: %s, начало: %s",
+                     r.headers.get("Content-Type"), r.content[:300])
+        raise RuntimeError("OneDrive вернул не Excel-файл")
 
-    patterns = [
-        r'"downloadUrl"\s*:\s*"([^"]+)"',
-        r'"url"\s*:\s*"(https://[^"]*\.xlsx[^"]*)"',
-        r'downloadUrl["\s:]+["\']?(https://[^\s"\'<>]+)',
-        r'"FileGetUrl"\s*:\s*"([^"]+)"',
-        r'sj\.u\(["\']([^"\']*download[^"\']*)["\']',
-    ]
-
-    download_url = None
-    for pattern in patterns:
-        match = re.search(pattern, html)
-        if match:
-            download_url = match.group(1).replace("\\u0026", "&").replace("\\/", "/")
-            logger.info("Найдена download ссылка через паттерн: %s", pattern)
-            break
-
-    if download_url:
-        r2 = requests.get(download_url, headers=headers, timeout=30, allow_redirects=True)
-        ct = r2.headers.get("Content-Type", "")
-        logger.info("Скачивание: статус %s, Content-Type: %s, размер: %d", r2.status_code, ct, len(r2.content))
-        if r2.status_code == 200 and len(r2.content) > 5000:
-            return r2.content
-
-    logger.error("Download URL не найден. Кусок HTML:\n%s", html[:3000])
-    raise RuntimeError("Не удалось найти прямую ссылку на скачивание в OneDrive")
-
+    return r.content
 # ── Зелёные строки (не прошли контроль) ───────────────────────────────────────
 
 def is_row_green(ws, row_idx: int) -> bool:
